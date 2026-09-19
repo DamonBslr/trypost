@@ -125,9 +125,14 @@ services:
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       ELEVENLABS_API_KEY: "${ELEVENLABS_API_KEY:-}"
-    ports:
-      - "${APP_PORT:-8000}:80"
-      - "${REVERB_PORT:-8080}:8080"
+    # Coolify (and the Caddy profile below) reach nginx over the Docker
+    # network. Do not publish 8000:80 — that bind fights Coolify's proxy
+    # ("port is already allocated"). Reverb is already proxied at /app/ on 80.
+    expose:
+      - "80"
+    # Standalone without Coolify or Caddy — uncomment to bind the host:
+    # ports:
+    #   - "${APP_PORT:-8000}:80"
     volumes:
       - storage:/var/www/html/storage/app
     depends_on:
@@ -172,7 +177,8 @@ services:
   #   2. Set APP_DOMAIN and APP_URL to https://<that domain>.
   #   3. Start with the proxy profile:
   #        docker compose -f compose.prod.yaml --profile proxy up -d
-  # Without the profile, the app is served directly on http://localhost:8000.
+  # Without Coolify or this profile, uncomment `ports` on `app` to serve
+  # http://localhost:8000.
   caddy:
     image: caddy:2-alpine
     container_name: trypost-caddy
