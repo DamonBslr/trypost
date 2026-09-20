@@ -41,11 +41,13 @@ services:
 
       # ===== WebSockets (Reverb) =====
       # These are how PHP talks to Reverb inside the container (keep localhost).
-      # Do not set VITE_REVERB_* here — Vite inlined those at image build.
-      # The browser follows the page host when the baked host is localhost,
-      # and nginx proxies /app/ and /apps/ to Reverb.
+      # Do not set VITE_REVERB_* here — Vite inlined host/port/scheme at image
+      # build. The browser follows the page host when the baked host is
+      # localhost, and nginx proxies /app/ and /apps/ to Reverb.
+      # REVERB_APP_KEY is also rendered onto the page for Echo; it does not
+      # need a matching VITE_REVERB_APP_KEY build-arg.
       REVERB_APP_ID: "1001"
-      REVERB_APP_KEY: trypost-reverb-key           # must match the key baked into the published image
+      REVERB_APP_KEY: trypost-reverb-key
       REVERB_APP_SECRET: change-me-reverb-secret   # <- change me
       REVERB_HOST: localhost
       REVERB_PORT: "8080"

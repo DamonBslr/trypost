@@ -1,6 +1,6 @@
 import { configureEcho } from '@laravel/echo-vue';
 
-import { resolveReverbConnection } from '@/lib/reverbConnection';
+import { resolveReverbAppKey, resolveReverbConnection } from '@/lib/reverbConnection';
 
 const { wsHost, port, scheme } = resolveReverbConnection(
     {
@@ -13,7 +13,10 @@ const { wsHost, port, scheme } = resolveReverbConnection(
 
 configureEcho({
     broadcaster: 'reverb',
-    key: import.meta.env.VITE_REVERB_APP_KEY,
+    key: resolveReverbAppKey(
+        import.meta.env.VITE_REVERB_APP_KEY,
+        typeof document === 'undefined' ? undefined : document,
+    ),
     wsHost,
     wsPort: port,
     wssPort: port,

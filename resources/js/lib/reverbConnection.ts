@@ -1,9 +1,9 @@
 /**
  * Resolve the browser WebSocket target for Reverb.
  *
- * VITE_REVERB_* is inlined at `npm run build` / image build. Runtime `.env`
- * on the container cannot change it. The published image bakes
- * localhost:8080, which is correct for Herd / local Docker (the browser
+ * VITE_REVERB_HOST/PORT/SCHEME are inlined at `npm run build` / image build.
+ * Runtime `.env` on the container cannot change those. The published image
+ * bakes localhost:8080, which is correct for Herd / local Docker (the browser
  * talks to Reverb on the machine) but wrong behind a public HTTPS domain
  * where nginx already proxies `/app/` and `/apps/` on the same host.
  *
@@ -42,4 +42,19 @@ export const resolveReverbConnection = (
     const port = Number(env.port ?? (scheme === 'https' ? 443 : 80));
 
     return { wsHost: bakedHost || 'localhost', port, scheme };
+};
+
+/**
+ * Prefer the runtime key from the page (REVERB_APP_KEY) over the Vite-baked
+ * VITE_REVERB_APP_KEY. Coolify / compose can set REVERB_APP_KEY without
+ * passing a Docker build-arg, which left Echo connecting to `/app/` with
+ * an empty key.
+ */
+export const resolveReverbAppKey = (
+    bakedKey?: string,
+    document?: Pick<Document, 'querySelector'> | null,
+): string => {
+    const runtime = document?.querySelector('meta[name="reverb-app-key"]')?.getAttribute('content')?.trim() ?? '';
+
+    return runtime || bakedKey?.trim() || '';
 };

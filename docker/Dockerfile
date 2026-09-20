@@ -94,8 +94,9 @@ RUN composer install \
 # Vite inlines VITE_* values into the JS bundle at build time. Runtime
 # container env (including VITE_REVERB_HOST) has no effect on that bundle.
 # Echo follows window.location when the baked host is localhost, so a
-# custom HTTPS domain does not need a rebuild. VITE_REVERB_APP_KEY still
-# must match REVERB_APP_KEY at runtime.
+# custom HTTPS domain does not need a rebuild. The Reverb app key is
+# also written onto the page from REVERB_APP_KEY at request time, so
+# Coolify only needs that runtime var — VITE_REVERB_APP_KEY is a fallback.
 # ----------------------------------------------------------------------------
 FROM composer-deps AS asset-build
 
@@ -103,7 +104,7 @@ FROM composer-deps AS asset-build
 RUN apk add --no-cache nodejs npm
 
 ARG VITE_APP_NAME=TryPost
-ARG VITE_REVERB_APP_KEY=
+ARG VITE_REVERB_APP_KEY=trypost-reverb-key
 ARG VITE_REVERB_HOST=localhost
 ARG VITE_REVERB_PORT=8080
 ARG VITE_REVERB_SCHEME=http
@@ -139,6 +140,7 @@ RUN mkdir -p storage/framework/cache/data \
 RUN composer dump-autoload --no-scripts --optimize \
     && php artisan wayfinder:generate --with-form \
     && npm ci --no-audit --no-fund \
+    && export VITE_REVERB_APP_KEY="${VITE_REVERB_APP_KEY:-${REVERB_APP_KEY:-trypost-reverb-key}}" \
     && npm run build \
     && npm run build:ssr
 
