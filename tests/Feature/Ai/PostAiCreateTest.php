@@ -5,9 +5,11 @@ declare(strict_types=1);
 use App\Enums\SocialAccount\Platform;
 use App\Enums\UserWorkspace\Role;
 use App\Jobs\Ai\StreamPostCreation;
+use App\Models\Post;
 use App\Models\SocialAccount;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Support\Ai\PostCreationStatus;
 use App\Support\AiPromptRules;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Str;
@@ -335,6 +337,9 @@ test('loading page renders the Inertia component with channel and query context'
             ->where('prompt', 'Hello')
             ->where('template', 'tweet_card')
             ->where('applyBrandVisuals', false)
+            ->where('creationStatus', 'unknown')
+            ->where('creationError', null)
+            ->where('postId', null)
         );
 });
 
@@ -355,6 +360,81 @@ test('loading page rejects non-uuid creation ids', function () {
     $this->actingAs($this->user)
         ->get(route('app.posts.ai.loading', 'not-a-uuid'))
         ->assertStatus(Response::HTTP_NOT_FOUND);
+});
+
+test('start records a pending creation status', function () {
+    Bus::fake();
+
+    $creationId = Str::uuid()->toString();
+
+    $this->actingAs($this->user)
+        ->postJson(route('app.posts.ai.create'), [
+            'prompt' => 'Write a post about productivity',
+            'format' => 'x_post',
+            'creation_id' => $creationId,
+        ])
+        ->assertAccepted();
+
+    expect(PostCreationStatus::get($this->user->id, $creationId))->toEqual([
+        'state' => PostCreationStatus::STATE_PENDING,
+        'post_id' => null,
+        'error' => null,
+    ]);
+});
+
+test('start does not overwrite a completed creation status', function () {
+    Bus::fake();
+
+    $creationId = Str::uuid()->toString();
+    $post = Post::factory()->create([
+        'workspace_id' => $this->workspace->id,
+        'user_id' => $this->user->id,
+    ]);
+
+    PostCreationStatus::markCompleted($this->user->id, $creationId, $post->id);
+
+    $this->actingAs($this->user)
+        ->postJson(route('app.posts.ai.create'), [
+            'prompt' => 'Write a post about productivity',
+            'format' => 'x_post',
+            'creation_id' => $creationId,
+        ])
+        ->assertAccepted();
+
+    expect(PostCreationStatus::get($this->user->id, $creationId))->toEqual([
+        'state' => PostCreationStatus::STATE_COMPLETED,
+        'post_id' => $post->id,
+        'error' => null,
+    ]);
+});
+
+test('loading page redirects to the post editor when generation has finished', function () {
+    $creationId = (string) Str::uuid();
+    $post = Post::factory()->create([
+        'workspace_id' => $this->workspace->id,
+        'user_id' => $this->user->id,
+    ]);
+
+    PostCreationStatus::markCompleted($this->user->id, $creationId, $post->id);
+
+    $this->actingAs($this->user)
+        ->get(route('app.posts.ai.loading', $creationId))
+        ->assertRedirect(route('app.posts.edit', $post));
+});
+
+test('loading page renders a failed generation instead of spinning', function () {
+    $creationId = (string) Str::uuid();
+
+    PostCreationStatus::markFailed($this->user->id, $creationId, 'The model overloaded.');
+
+    $this->actingAs($this->user)
+        ->get(route('app.posts.ai.loading', $creationId))
+        ->assertInertia(fn ($page) => $page
+            ->component('posts/ai/Loading')
+            ->where('creationStatus', PostCreationStatus::STATE_FAILED)
+            ->where('creationError', 'The model overloaded.')
+            ->where('postId', null)
+        );
 });
 
 it('defaults to the image_card template when none is given', function () {

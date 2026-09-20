@@ -7,7 +7,9 @@ namespace App\Http\Controllers\App;
 use App\Http\Requests\App\Ai\StartPostCreationRequest;
 use App\Jobs\Ai\StreamPostCreation;
 use App\Models\SocialAccount;
+use App\Support\Ai\PostCreationStatus;
 use Illuminate\Http\JsonResponse;
+use Illuminate\Http\RedirectResponse;
 use Illuminate\Http\Request;
 use Illuminate\Support\Facades\Gate;
 use Inertia\Inertia;
@@ -41,6 +43,8 @@ class PostAiCreateController extends Controller
 
         $creationId = $request->string('creation_id')->toString();
 
+        PostCreationStatus::markPending($request->user()->id, $creationId);
+
         StreamPostCreation::dispatch(
             userId: $request->user()->id,
             creationId: $creationId,
@@ -60,8 +64,16 @@ class PostAiCreateController extends Controller
         ], Response::HTTP_ACCEPTED);
     }
 
-    public function loading(Request $request, string $creationId): InertiaResponse
+    public function loading(Request $request, string $creationId): InertiaResponse|RedirectResponse
     {
+        $status = PostCreationStatus::get($request->user()->id, $creationId);
+        $state = data_get($status, 'state');
+        $postId = data_get($status, 'post_id');
+
+        if ($state === PostCreationStatus::STATE_COMPLETED && is_string($postId)) {
+            return redirect()->route('app.posts.edit', $postId);
+        }
+
         return Inertia::render('posts/ai/Loading', [
             'creationId' => $creationId,
             'channel' => "user.{$request->user()->id}.ai-creation.{$creationId}",
@@ -72,6 +84,9 @@ class PostAiCreateController extends Controller
             'date' => $request->query('date') ?: null,
             'template' => (string) $request->query('template', 'image_card'),
             'applyBrandVisuals' => $request->boolean('apply_brand_visuals', true),
+            'creationStatus' => $state ?? 'unknown',
+            'creationError' => data_get($status, 'error'),
+            'postId' => $postId,
         ]);
     }
 }

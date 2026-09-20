@@ -23,6 +23,7 @@ use App\Models\SocialAccount;
 use App\Models\User;
 use App\Models\Workspace;
 use App\Services\Ai\RecordAiUsage;
+use App\Support\Ai\PostCreationStatus;
 use Illuminate\Bus\Queueable;
 use Illuminate\Contracts\Queue\ShouldBeUnique;
 use Illuminate\Contracts\Queue\ShouldQueue;
@@ -30,12 +31,15 @@ use Illuminate\Foundation\Bus\Dispatchable;
 use Illuminate\Queue\InteractsWithQueue;
 use Illuminate\Queue\SerializesModels;
 use Illuminate\Support\Facades\Log;
+use Throwable;
 
 class StreamPostCreation implements ShouldBeUnique, ShouldQueue
 {
     use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
 
     public int $uniqueFor = 990;
+
+    public int $timeout = 900;
 
     public function __construct(
         public string $userId,
@@ -105,17 +109,27 @@ class StreamPostCreation implements ShouldBeUnique, ShouldQueue
 
             $generated = $style->assemble($structured, $context);
             $post = $this->createPostFromGenerated($workspace, $generated, $socialAccount);
+            PostCreationStatus::markCompleted($this->userId, $this->creationId, $post->id);
             $this->notifyReady($workspace, $post);
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::error('StreamPostCreation failed', [
                 'creation_id' => $this->creationId,
                 'error' => $e->getMessage(),
             ]);
 
-            PostCreationReady::dispatch($this->userId, $this->creationId, null, $e->getMessage());
+            $this->recordFailure($e->getMessage());
 
             throw $e;
         }
+    }
+
+    public function failed(?Throwable $exception): void
+    {
+        if (PostCreationStatus::isTerminal($this->userId, $this->creationId)) {
+            return;
+        }
+
+        $this->recordFailure($exception?->getMessage() ?? 'Generation timed out.');
     }
 
     /**
@@ -165,7 +179,7 @@ class StreamPostCreation implements ShouldBeUnique, ShouldQueue
                 userId: $this->userId,
                 metadata: ['agent' => 'post_humanizer', 'format' => $format->value],
             );
-        } catch (\Throwable $e) {
+        } catch (Throwable $e) {
             Log::warning('PostContentHumanizer failed, using generator output as-is', [
                 'creation_id' => $this->creationId,
                 'error' => $e->getMessage(),
@@ -225,6 +239,12 @@ class StreamPostCreation implements ShouldBeUnique, ShouldQueue
         }
 
         return $post;
+    }
+
+    private function recordFailure(string $error): void
+    {
+        PostCreationStatus::markFailed($this->userId, $this->creationId, $error);
+        PostCreationReady::dispatch($this->userId, $this->creationId, null, $error);
     }
 
     private function notifyReady(Workspace $workspace, Post $post): void

@@ -1,9 +1,9 @@
 <script setup lang="ts">
-import { Head, router, useHttp } from '@inertiajs/vue3';
+import { Head, router, useHttp, usePoll } from '@inertiajs/vue3';
 import { echo } from '@laravel/echo-vue';
 import { IconLoader2, IconSparkles } from '@tabler/icons-vue';
 import { trans } from 'laravel-vue-i18n';
-import { computed, onBeforeUnmount, onMounted, ref } from 'vue';
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 
 import { start as startPostCreation } from '@/actions/App/Http/Controllers/App/PostAiCreateController';
 import { Button } from '@/components/ui/button';
@@ -24,12 +24,16 @@ const props = defineProps<{
     date: string | null;
     template: string;
     applyBrandVisuals: boolean;
+    creationStatus: 'unknown' | 'pending' | 'completed' | 'failed';
+    creationError: string | null;
+    postId: string | null;
 }>();
 
 const status = ref<'loading' | 'error'>('loading');
 const errorMessage = ref('');
 let subscribed = false;
 let unmounted = false;
+let finishing = false;
 let generationTimeout: ReturnType<typeof setTimeout> | null = null;
 
 const TEXT_BASELINE_SECONDS = 30;
@@ -101,11 +105,57 @@ const httpStart = useHttp<{
     apply_brand_visuals: props.applyBrandVisuals,
 });
 
+const { stop: stopPolling } = usePoll(2000, {
+    only: ['creationStatus', 'creationError', 'postId'],
+});
+
+const applyCreationOutcome = (): boolean => {
+    if (finishing) {
+        return true;
+    }
+
+    if (props.creationStatus === 'completed' && props.postId) {
+        finishing = true;
+        unsubscribe();
+        stopPolling();
+        router.visit(editPostRoute(props.postId).url);
+        return true;
+    }
+
+    if (props.creationStatus === 'failed') {
+        finishing = true;
+        unsubscribe();
+        stopPolling();
+        status.value = 'error';
+        errorMessage.value = props.creationError ?? trans('posts.create.steps.preview_error');
+        return true;
+    }
+
+    return false;
+};
+
+watch(
+    () => [props.creationStatus, props.postId, props.creationError] as const,
+    () => {
+        applyCreationOutcome();
+    },
+);
+
 const startGeneration = async () => {
-    const confirmed = await subscribePrivateChannel(props.channel, (channel) => {
+    if (applyCreationOutcome()) {
+        return;
+    }
+
+    await subscribePrivateChannel(props.channel, (channel) => {
         subscribed = true;
         channel.listen('.ai.creation.completed', (e: { post_id?: string; error?: string }) => {
+            if (finishing) {
+                return;
+            }
+
+            finishing = true;
             unsubscribe();
+            stopPolling();
             if (e.error || !e.post_id) {
                 status.value = 'error';
                 errorMessage.value = e.error ?? trans('posts.create.steps.preview_error');
@@ -120,29 +170,29 @@ const startGeneration = async () => {
         return;
     }
 
-    if (!confirmed) {
-        unsubscribe();
-        status.value = 'error';
-        errorMessage.value = trans('posts.create.steps.preview_error');
-        return;
-    }
-
     generationTimeout = setTimeout(() => {
         unsubscribe();
+        stopPolling();
         status.value = 'error';
         errorMessage.value = trans('posts.create.steps.preview_error');
     }, GENERATION_TIMEOUT_MS);
+
+    if (props.creationStatus !== 'unknown') {
+        return;
+    }
 
     try {
         await httpStart.post(startPostCreation.url());
 
         if (httpStart.hasErrors) {
             unsubscribe();
+            stopPolling();
             status.value = 'error';
             errorMessage.value = httpStart.errors.social_account_id ?? Object.values(httpStart.errors)[0] ?? trans('posts.create.steps.preview_error');
         }
     } catch (error: unknown) {
         unsubscribe();
+        stopPolling();
         status.value = 'error';
         errorMessage.value = extractErrorMessage(error) ?? trans('posts.create.steps.preview_error');
     }

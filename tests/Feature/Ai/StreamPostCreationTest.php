@@ -12,10 +12,12 @@ use App\Models\PostPlatform;
 use App\Models\SocialAccount;
 use App\Models\User;
 use App\Models\Workspace;
+use App\Support\Ai\PostCreationStatus;
 use Illuminate\Support\Facades\Bus;
 use Illuminate\Support\Facades\Storage;
 use Illuminate\Support\Str;
 use Laravel\Ai\Image;
+use RuntimeException;
 
 beforeEach(function () {
     Bus::fake();
@@ -242,4 +244,69 @@ test('the humanizer is given the same platform context as the generator so the r
 
     PostContentGenerator::assertPrompted(fn ($prompt) => $prompt->agent->platformContext === 'instagram_feed');
     PostContentHumanizer::assertPrompted(fn ($prompt) => $prompt->agent->platformContext === 'instagram_feed');
+});
+
+test('a successful run stores a completed creation status so reload can redirect', function () {
+    PostContentGenerator::fake([[
+        'content' => 'A single productivity tip',
+        'image_title' => 'Tip',
+        'image_body' => 'Do less',
+        'image_keywords' => [],
+    ]]);
+    PostContentHumanizer::fake([[
+        'content' => 'A single productivity tip',
+        'image_title' => 'Tip',
+        'image_body' => 'Do less',
+    ]]);
+
+    $creationId = (string) Str::uuid();
+
+    (new StreamPostCreation(
+        userId: $this->user->id,
+        creationId: $creationId,
+        workspaceId: $this->workspace->id,
+        format: 'instagram_feed',
+        socialAccountId: $this->account->id,
+        imageCount: 0,
+        prompt: 'Five tips about productivity',
+    ))->handle();
+
+    $post = $this->workspace->posts()->latest()->first();
+
+    expect(PostCreationStatus::get($this->user->id, $creationId))->toEqual([
+        'state' => PostCreationStatus::STATE_COMPLETED,
+        'post_id' => $post->id,
+        'error' => null,
+    ]);
+});
+
+test('failed() records an error without overwriting a completed generation', function () {
+    $creationId = (string) Str::uuid();
+
+    $job = new StreamPostCreation(
+        userId: $this->user->id,
+        creationId: $creationId,
+        workspaceId: $this->workspace->id,
+        format: 'instagram_feed',
+        socialAccountId: $this->account->id,
+        imageCount: 0,
+        prompt: 'Five tips about productivity',
+    );
+
+    $job->failed(new RuntimeException('The model overloaded.'));
+
+    expect(PostCreationStatus::get($this->user->id, $creationId))->toEqual([
+        'state' => PostCreationStatus::STATE_FAILED,
+        'post_id' => null,
+        'error' => 'The model overloaded.',
+    ]);
+
+    PostCreationStatus::markCompleted($this->user->id, $creationId, 'post-123');
+    $job->failed(new RuntimeException('late failure'));
+
+    expect(PostCreationStatus::get($this->user->id, $creationId))->toEqual([
+        'state' => PostCreationStatus::STATE_COMPLETED,
+        'post_id' => 'post-123',
+        'error' => null,
+    ]);
 });

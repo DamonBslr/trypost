@@ -91,10 +91,11 @@ RUN composer install \
 # invokes `php artisan wayfinder:generate` during vite build — splitting
 # the stages would mean the vite phase has no PHP available.
 #
-# Vite inlines VITE_* values into the JS bundle at build time. Pass them
-# as build args (--build-arg VITE_REVERB_APP_KEY=...) so the bundle reaches
-# the browser with the correct Reverb/PostHog config. Runtime env vars on
-# the container have no effect on the already-compiled bundle.
+# Vite inlines VITE_* values into the JS bundle at build time. Runtime
+# container env (including VITE_REVERB_HOST) has no effect on that bundle.
+# Echo follows window.location when the baked host is localhost, so a
+# custom HTTPS domain does not need a rebuild. VITE_REVERB_APP_KEY still
+# must match REVERB_APP_KEY at runtime.
 # ----------------------------------------------------------------------------
 FROM composer-deps AS asset-build
 
