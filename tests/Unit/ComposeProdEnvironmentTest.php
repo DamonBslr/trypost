@@ -34,6 +34,14 @@ test('coolify can prefill APP_URL from the domain assigned to the app service', 
     expect(composeProdYaml())->toContain('${SERVICE_URL_APP');
 });
 
+test('the coolify compose file does not start caddy (coolify already proxies and ignores profiles)', function () {
+    expect(composeProdYaml())->not->toMatch('/^\s+caddy:/m');
+});
+
+test('production logs go to stderr so a platform like Coolify surfaces Laravel exceptions', function () {
+    expect(composeProdYaml())->toContain('LOG_CHANNEL: "${LOG_CHANNEL:-stderr}"');
+});
+
 test('the production env example documents every required compose secret', function (string $key) {
     expect(productionEnvExample())->toMatch('/^'.$key.'=/m');
 })->with([

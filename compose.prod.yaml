@@ -16,7 +16,8 @@
 #      On Coolify: Build Pack = Docker Compose, Compose Location =
 #      compose.prod.yaml, then fill Environment Variables and deploy.
 #      Coolify writes its own `.env` — do not reuse a development Laravel
-#      `.env` (it points DB_HOST at 127.0.0.1).
+#      `.env` (it points DB_HOST at 127.0.0.1). Do not add compose.prod.proxy.yaml
+#      on Coolify — that file is Caddy for a bare VPS.
 #
 # This pulls the published image — no local build. Postgres, Redis, the queue
 # workers, the scheduler and the WebSocket server all run for you.
@@ -39,6 +40,9 @@ services:
       APP_URL: "${APP_URL:-${SERVICE_URL_APP:-http://localhost:8000}}"
       SELF_HOSTED: "${SELF_HOSTED:-true}"
       TRYPOST_TARGET: production
+      # Coolify shows container stdout/stderr, not storage/logs/laravel.log.
+      LOG_CHANNEL: "${LOG_CHANNEL:-stderr}"
+      LOG_STACK: "${LOG_STACK:-stderr}"
 
       # ===== Database (bundled postgres service below) =====
       DB_CONNECTION: "${DB_CONNECTION:-pgsql}"
@@ -125,9 +129,9 @@ services:
       GEMINI_API_KEY: "${GEMINI_API_KEY:-}"
       OPENROUTER_API_KEY: "${OPENROUTER_API_KEY:-}"
       ELEVENLABS_API_KEY: "${ELEVENLABS_API_KEY:-}"
-    # Coolify (and the Caddy profile below) reach nginx over the Docker
-    # network. Do not publish 8000:80 — that bind fights Coolify's proxy
-    # ("port is already allocated"). Reverb is already proxied at /app/ on 80.
+    # Coolify's proxy reaches nginx over the Docker network. Do not publish
+    # 8000:80 — that bind fights Coolify ("port is already allocated").
+    # Reverb is already proxied at /app/ on 80.
     expose:
       - "80"
     # Standalone without Coolify or Caddy — uncomment to bind the host:
@@ -170,35 +174,7 @@ services:
       timeout: 3s
       retries: 5
 
-  # Optional reverse proxy with automatic HTTPS (Let's Encrypt).
-  # Skip this on Coolify — Coolify already proxies the app service.
-  # To serve on a domain without Coolify:
-  #   1. Point the domain's DNS at this host.
-  #   2. Set APP_DOMAIN and APP_URL to https://<that domain>.
-  #   3. Start with the proxy profile:
-  #        docker compose -f compose.prod.yaml --profile proxy up -d
-  # Without Coolify or this profile, uncomment `ports` on `app` to serve
-  # http://localhost:8000.
-  caddy:
-    image: caddy:2-alpine
-    container_name: trypost-caddy
-    restart: unless-stopped
-    profiles: [proxy]
-    environment:
-      APP_DOMAIN: "${APP_DOMAIN:-${SERVICE_FQDN_APP:-post.example.com}}"
-    ports:
-      - "80:80"
-      - "443:443"
-    volumes:
-      - ./Caddyfile:/etc/caddy/Caddyfile:ro
-      - caddy-data:/data
-      - caddy-config:/config
-    depends_on:
-      - app
-
 volumes:
   pgdata:
   redisdata:
   storage:
-  caddy-data:
-  caddy-config:

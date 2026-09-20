@@ -13,9 +13,32 @@ if [ "$#" -gt 0 ]; then
     exec "$@"
 fi
 
-if [ "${TARGET}" = "production" ] && [ -z "${APP_KEY:-}" ]; then
-    echo "[entrypoint] APP_KEY is required in production" >&2
-    exit 1
+if [ "${TARGET}" = "production" ]; then
+    if [ -z "${APP_KEY:-}" ]; then
+        echo "[entrypoint] APP_KEY is required in production" >&2
+        exit 1
+    fi
+
+    # AES-256-CBC needs 32 bytes. Coolify's random-string button, quotes, or a
+    # truncated paste all produce the login 500 "incorrect key length".
+    php -r '
+        $key = getenv("APP_KEY") ?: "";
+        $cipher = getenv("APP_CIPHER") ?: "AES-256-CBC";
+        if (str_starts_with($key, "base64:")) {
+            $decoded = base64_decode(substr($key, 7), true);
+            if ($decoded === false) {
+                fwrite(STDERR, "[entrypoint] APP_KEY is not valid base64 after the base64: prefix\n");
+                exit(1);
+            }
+            $key = $decoded;
+        }
+        $len = strlen($key);
+        $need = str_contains($cipher, "256") ? 32 : 16;
+        if ($len !== $need) {
+            fwrite(STDERR, "[entrypoint] APP_KEY is the wrong length for {$cipher} (got {$len} bytes, need {$need}). Generate with: docker run --rm ghcr.io/trypostit/trypost:latest php artisan key:generate --show\n");
+            exit(1);
+        }
+    '
 fi
 
 # 1) Bootstrap .env from the Docker template on first dev boot. The bind-mount
