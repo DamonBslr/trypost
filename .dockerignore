@@ -37,6 +37,10 @@ storage/pail
 storage/*.key
 storage/oauth-*.key
 
+# Tests (dev bind-mounts the host tree; production does not run them)
+tests
+phpunit.xml
+
 # Test caches
 .phpunit.cache
 .phpunit.result.cache

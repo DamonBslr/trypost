@@ -26,9 +26,15 @@ use Tests\TestCase;
 |
 */
 
+// Dockerfile assertions only read docker/Dockerfile and must not boot Postgres.
+$unitTargets = collect(glob(__DIR__.'/Unit/*') ?: [])
+    ->reject(fn (string $path): bool => str_ends_with($path, 'DockerProductionDockerfileTest.php'))
+    ->map(fn (string $path): string => 'Unit/'.basename($path))
+    ->all();
+
 pest()->extend(TestCase::class)
     ->use(RefreshDatabase::class)
-    ->in('Feature', 'Unit');
+    ->in('Feature', ...$unitTargets);
 
 pest()->extend(BrowserTestCase::class)
     ->use(RefreshDatabase::class)
