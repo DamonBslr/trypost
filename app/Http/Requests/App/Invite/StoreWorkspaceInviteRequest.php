@@ -28,7 +28,7 @@ class StoreWorkspaceInviteRequest extends FormRequest
     {
         return [
             'email' => ['required', 'email', 'max:255'],
-            'role' => ['required', Rule::in(array_column(WorkspaceRole::cases(), 'value'))],
+            'role' => ['required', 'string', Rule::in(array_column(WorkspaceRole::cases(), 'value'))],
         ];
     }
 

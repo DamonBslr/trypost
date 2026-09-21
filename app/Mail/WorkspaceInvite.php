@@ -18,7 +18,9 @@ class WorkspaceInvite extends Mailable implements ShouldQueue
 
     public function __construct(
         public Invite $invite
-    ) {}
+    ) {
+        $this->invite->loadMissing('account');
+    }
 
     public function envelope(): Envelope
     {

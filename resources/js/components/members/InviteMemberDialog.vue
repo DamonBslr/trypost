@@ -55,7 +55,7 @@ const onSuccess = () => {
                     <Input
                         id="invite-email"
                         name="email"
-                        type="email"
+                        type="text"
                         :placeholder="trans('settings.members.invite.email_placeholder')"
                     />
                     <InputError :message="errors.email" />
@@ -63,7 +63,7 @@ const onSuccess = () => {
 
                 <div class="grid gap-2">
                     <Label for="invite-role">{{ $t('settings.members.invite.role') }}</Label>
-                    <Select v-model="inviteRole" name="role">
+                    <Select v-model="inviteRole">
                         <SelectTrigger class="w-full">
                             <SelectValue :placeholder="trans('settings.members.invite.role_placeholder')" />
                         </SelectTrigger>

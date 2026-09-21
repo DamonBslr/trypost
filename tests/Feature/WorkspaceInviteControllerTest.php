@@ -133,6 +133,68 @@ test('store invite fails if invite already exists', function () {
     $response->assertSessionHasErrors('email');
 });
 
+test('store invite fails if a pending invite exists for another workspace on the same account', function () {
+    $otherWorkspace = Workspace::factory()->create([
+        'user_id' => $this->user->id,
+        'account_id' => $this->account->id,
+    ]);
+    $otherWorkspace->members()->attach($this->user->id, ['role' => WorkspaceRole::Admin->value]);
+
+    Invite::factory()->create([
+        'account_id' => $this->account->id,
+        'invited_by' => $this->user->id,
+        'email' => 'shared@example.com',
+        'workspaces' => [$otherWorkspace->id],
+    ]);
+
+    $response = $this->actingAs($this->user)->post(route('app.invites.store'), [
+        'email' => 'shared@example.com',
+        'role' => WorkspaceRole::Member->value,
+    ]);
+
+    $response->assertSessionHasErrors('email');
+    expect(Invite::query()->where('email', 'shared@example.com')->count())->toBe(1);
+});
+
+test('store invite reuses an accepted invite row instead of hitting the unique constraint', function () {
+    Invite::factory()->create([
+        'account_id' => $this->account->id,
+        'invited_by' => $this->user->id,
+        'email' => 'returning@example.com',
+        'workspaces' => [$this->workspace->id],
+        'accepted_at' => now(),
+        'role' => WorkspaceRole::Viewer,
+    ]);
+
+    $response = $this->actingAs($this->user)->post(route('app.invites.store'), [
+        'email' => 'returning@example.com',
+        'role' => WorkspaceRole::Member->value,
+    ]);
+
+    $response->assertRedirect();
+    $response->assertSessionDoesntHaveErrors();
+
+    expect(Invite::query()->where('email', 'returning@example.com')->count())->toBe(1);
+
+    $this->assertDatabaseHas('invites', [
+        'email' => 'returning@example.com',
+        'role' => WorkspaceRole::Member->value,
+        'accepted_at' => null,
+    ]);
+
+    Mail::assertQueued(WorkspaceInviteMail::class);
+});
+
+test('store invite rejects a role submitted as an array', function () {
+    $response = $this->actingAs($this->user)->post(route('app.invites.store'), [
+        'email' => 'array-role@example.com',
+        'role' => [WorkspaceRole::Member->value],
+    ]);
+
+    $response->assertSessionHasErrors('role');
+    $this->assertDatabaseMissing('invites', ['email' => 'array-role@example.com']);
+});
+
 test('store invite fails if user is already member', function () {
     $member = User::factory()->create([
         'account_id' => $this->account->id,
