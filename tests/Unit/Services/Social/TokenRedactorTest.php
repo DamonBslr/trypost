@@ -10,6 +10,12 @@ test('redact strips access_token in URL form', function () {
     expect(TokenRedactor::redact($input))->toBe('POST https://api.example.com?access_token=[REDACTED]&page=1');
 });
 
+test('redact strips client_secret in URL form', function () {
+    $input = 'GET https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=shh&access_token=igaa';
+
+    expect(TokenRedactor::redact($input))->toBe('GET https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=[REDACTED]&access_token=[REDACTED]');
+});
+
 test('redact strips access_token in JSON form', function () {
     $input = '{"data":{"access_token":"abc123xyz","expires_in":3600}}';
 

@@ -8,6 +8,8 @@ use GuzzleHttp\RequestOptions;
 use Laravel\Socialite\Two\AbstractProvider;
 use Laravel\Socialite\Two\ProviderInterface;
 use Laravel\Socialite\Two\User;
+use Psr\Http\Message\ResponseInterface;
+use RuntimeException;
 
 class InstagramProvider extends AbstractProvider implements ProviderInterface
 {
@@ -39,13 +41,20 @@ class InstagramProvider extends AbstractProvider implements ProviderInterface
     protected function getUserByToken($token): array
     {
         $response = $this->getHttpClient()->get(config('trypost.platforms.instagram.graph_api').'/me', [
+            RequestOptions::HTTP_ERRORS => false,
             RequestOptions::QUERY => [
                 'access_token' => $token,
                 'fields' => 'id,username,account_type,name,profile_picture_url',
             ],
         ]);
 
-        return json_decode((string) $response->getBody(), true);
+        $user = $this->jsonBody($response);
+
+        if ($response->getStatusCode() >= 400 || ! is_string(data_get($user, 'id'))) {
+            throw new RuntimeException($this->instagramErrorMessage($user, 'Instagram profile lookup failed.'));
+        }
+
+        return $user;
     }
 
     protected function mapUserToObject(array $user): User
@@ -67,28 +76,42 @@ class InstagramProvider extends AbstractProvider implements ProviderInterface
         }
 
         $response = $this->getHttpClient()->post($this->getTokenUrl(), [
+            RequestOptions::HTTP_ERRORS => false,
             RequestOptions::MULTIPART => $multipart,
         ]);
 
-        $data = json_decode((string) $response->getBody(), true);
+        $data = $this->flattenShortLivedToken($this->jsonBody($response));
+
+        if ($response->getStatusCode() >= 400 || ! is_string(data_get($data, 'access_token')) || data_get($data, 'access_token') === '') {
+            throw new RuntimeException($this->instagramErrorMessage($data, 'Instagram token exchange failed.'));
+        }
 
         return $this->exchangeForLongLivedToken($data);
     }
 
+    /**
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
     protected function exchangeForLongLivedToken(array $data): array
     {
-        // Although Meta's docs don't list `client_id` as a required parameter,
-        // the API in practice rejects the request without it.
+        // Official params are grant_type + client_secret + access_token only.
+        // Sending client_id here makes graph.instagram.com return OAuthException
+        // code 200 ("API access blocked") after a successful short-lived exchange.
         $response = $this->getHttpClient()->get(config('trypost.platforms.instagram.auth_api').'/access_token', [
+            RequestOptions::HTTP_ERRORS => false,
             RequestOptions::QUERY => [
                 'grant_type' => 'ig_exchange_token',
-                'client_id' => $this->clientId,
                 'client_secret' => $this->clientSecret,
                 'access_token' => data_get($data, 'access_token'),
             ],
         ]);
 
-        $longLivedData = json_decode((string) $response->getBody(), true);
+        $longLivedData = $this->jsonBody($response);
+
+        if ($response->getStatusCode() >= 400 || ! is_string(data_get($longLivedData, 'access_token')) || data_get($longLivedData, 'access_token') === '') {
+            throw new RuntimeException($this->instagramErrorMessage($longLivedData, 'Instagram long-lived token exchange failed.'));
+        }
 
         return array_merge($data, [
             'access_token' => $longLivedData['access_token'],
@@ -105,5 +128,43 @@ class InstagramProvider extends AbstractProvider implements ProviderInterface
             'redirect_uri' => $this->redirectUrl,
             'code' => $code,
         ];
+    }
+
+    /**
+     * Business Login for Instagram returns `{ data: [{ access_token, user_id, permissions }] }`.
+     * Older apps still get a flat `{ access_token, user_id }`. Socialite reads the top-level key.
+     *
+     * @param  array<string, mixed>  $data
+     * @return array<string, mixed>
+     */
+    private function flattenShortLivedToken(array $data): array
+    {
+        $entry = data_get($data, 'data.0');
+
+        if (is_array($entry) && isset($entry['access_token'])) {
+            return array_merge($data, $entry);
+        }
+
+        return $data;
+    }
+
+    /**
+     * @return array<string, mixed>
+     */
+    private function jsonBody(ResponseInterface $response): array
+    {
+        $data = json_decode((string) $response->getBody(), true);
+
+        return is_array($data) ? $data : [];
+    }
+
+    /**
+     * @param  array<string, mixed>  $data
+     */
+    private function instagramErrorMessage(array $data, string $fallback): string
+    {
+        $message = data_get($data, 'error_message') ?? data_get($data, 'error.message');
+
+        return is_string($message) && $message !== '' ? $message : $fallback;
     }
 }

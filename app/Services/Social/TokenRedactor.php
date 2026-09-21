@@ -21,12 +21,14 @@ class TokenRedactor
         return preg_replace(
             [
                 '/access_token=([^&"\s]+)/',
+                '/client_secret=([^&"\s]+)/',
                 '/"access_token"\s*:\s*"([^"]+)"/',
                 '/Bearer\s+\S+/',
                 '/"token"\s*:\s*"([^"]+)"/',
             ],
             [
                 'access_token=[REDACTED]',
+                'client_secret=[REDACTED]',
                 '"access_token":"[REDACTED]"',
                 'Bearer [REDACTED]',
                 '"token":"[REDACTED]"',

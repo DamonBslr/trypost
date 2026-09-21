@@ -26,7 +26,8 @@ test('instagram authorize url forces reauth so a second account is reachable', f
 
     expect($response->headers->get('Location'))
         ->toStartWith('https://www.instagram.com/oauth/authorize')
-        ->toContain('force_reauth=true');
+        ->toContain('force_reauth=true')
+        ->toContain('redirect_uri='.urlencode(url('/accounts/instagram/callback')));
 });
 
 test('instagram connect redirects to oauth provider', function () {
@@ -136,8 +137,12 @@ test('instagram callback handles oauth errors gracefully', function () {
         'social_connect_workspace' => $this->workspace->id,
     ]);
 
+    Log::spy();
+
     $mock = Mockery::mock();
-    $mock->shouldReceive('user')->andThrow(new Exception('OAuth error'));
+    $mock->shouldReceive('user')->andThrow(new Exception(
+        'Client error: `GET https://graph.instagram.com/access_token?grant_type=ig_exchange_token&client_secret=shh&access_token=igaa` resulted in a `400 Bad Request`'
+    ));
 
     Socialite::shouldReceive('driver')
         ->with('instagram')
@@ -148,6 +153,14 @@ test('instagram callback handles oauth errors gracefully', function () {
     $response->assertOk();
     $response->assertInertia(fn (AssertableInertia $page) => $page->where('success', false));
     $response->assertInertia(fn (AssertableInertia $page) => $page->where('message', 'Error connecting account. Please try again.'));
+
+    Log::shouldHaveReceived('error')->withArgs(function (string $message, array $context): bool {
+        return $message === 'Instagram OAuth Error'
+            && str_contains((string) $context['error'], 'client_secret=[REDACTED]')
+            && str_contains((string) $context['error'], 'access_token=[REDACTED]')
+            && ! str_contains((string) $context['error'], 'client_secret=shh')
+            && ! str_contains((string) $context['error'], 'access_token=igaa');
+    });
 });
 
 test('instagram connect redirects to create workspace if none exists', function () {
